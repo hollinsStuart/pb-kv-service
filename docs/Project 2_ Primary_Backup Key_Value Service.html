@@ -1,0 +1,564 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link rel="StyleSheet" href="style.css" type="text/css">
+<title>Project 2: Primary/Backup Key/Value Service</title>
+</head>
+
+<body>
+<div align="center">
+<h1>Project 2: Primary/Backup Key/Value Service</h1>
+</div>
+
+
+<div align="center">
+<h3>Due: February 28th, 2024</h3>
+</div>
+
+<hr>
+
+<h3>Introduction</h3>
+
+<p> In Project 1, handling failures was relatively easy because the
+Workers did not maintain state.  The Manager did maintain state,
+but you didn't have to make it fault-tolerant.  This project is a
+first step towards fault tolerance for servers with state.
+
+<h3>Road map for projects 2-4</h3>
+
+<p>In the next 3 projects, you will build several key/value services. The 
+services support three RPCs: Put(key, value), Append(key, arg), and Get(key). 
+The service maintains a simple database of key/value pairs. Put() replaces the 
+value for a particular key in the database. Append(key, arg) appends arg to
+key's current value. Get() fetches the current value for a key.
+
+<p>The projects differ in the degree of fault tolerance and performance they
+provide for the key/value service:
+
+<ul>
+
+  <li>Project 2 uses primary/backup replication, assisted by a view
+  service that decides which machines are responsible for servicing
+  requests.  The view service allows the primary/backup service to
+  work correctly in the presence of network partitions and node
+  failures, as long as the primary and backup do not fail
+  simultaneously.  The view service itself is not replicated, and is a
+  single point of failure.
+
+  <li>Project 3 uses the Paxos distributed consensus protocol to
+  replicate the key/value database with no single point of failure,
+  and handles network partitions correctly.  This key/value service is
+  slower than a non-replicated key/value server would be, but provides
+  fault tolerance without the arbitrary stalls imposed by
+  Primary/Backup.
+
+  <li>Project 4 provides a <em>sharded</em> key/value database.  In
+  this system, the key/value service can perform Put/Get operations in
+  parallel on different shards, allowing it to support applications
+  that can put a high load on a storage system.  Each shard's state is
+  replicated using Paxos, with each shard assigned to a particular
+  Paxos group. A replicated configuration service manages these
+  assignments and can change the assignment of keys to shards, for
+  example, in response to changing load.  Project 4 has the core of a
+  real-world design for 1000s of servers.
+
+</ul>
+
+<p>In each project, you will have to do some design.  We give you a
+sketch of the overall design (and code for the boring pieces), and the
+set of RPCs you can use, but you will have to design a complete
+protocol given the material from lecture.  The tests explore your
+protocol's handling of failure scenarios as well as general
+correctness.  You may need to re-design (and thus re-implement) in
+light of problems exposed by the tests; careful thought and planning
+may help you avoid too many re-design cycles. We don't give you a
+description of the test cases (other than the Go code); in the real
+world, you would have to come up with them yourself. Some of the more
+advanced test cases are hidden.
+
+<h3>Overview of Project 2</h3>
+
+<p> In this project, you'll build a fault-tolerant key/value service
+using a form of primary/backup replication.  In order to ensure that
+all parties (clients and servers) agree on which server is the
+primary, and which is the backup, we'll introduce a new server called
+the <em>view service</em>. The view service monitors whether each
+potential server is available or not. If the current primary or backup
+is unavailable for "long enough", the view service selects a server to
+replace it. A client checks with the view service to find the current
+primary. The servers cooperate with the view service to ensure that at
+most one primary is active at a time.
+
+<p>
+<b>Note</b>: when we say a server is "unavailable" to the view service,
+that means <em>unavailable from the view service's perspective.</em>
+The server may or may not be alive, and if alive the clients and other
+servers may or may not still be able to talk with it. This is a major
+source of complexity in this project!
+
+<p>
+Your key/value service will suport replacement of unavailable
+servers. If the primary is judged to be unavailable, the view service
+will promote the backup to be primary. If the backup is judged to be
+unavailable, or is promoted, and there is an idle server available,
+the view service will recruit it to be the backup.  The newly-promoted
+primary will send its complete database to the new backup, and then
+send subsequent requests to the backup to ensure that the backup's
+key/value database remains identical to the primary's. This also
+serves to prevent a "split brain" wherein the primary mistakenly
+believes it is still the primary even after it has been replaced.
+
+<p>
+A key/value server which fails may restart, but it will do so without
+a copy of the replicated data (i.e., the keys and values). In our
+model, your key/value server will keep the data in memory transiently,
+not on disk persistently. One consequence of this model is that if the
+primary failes without a fully-instantiated backup in place, it cannot
+resume its role as the primary, and the system can no longer serve any
+requests.
+
+<p>
+Likewise, if a key/value server has not failed but learns it has been
+declared unavailable by the view service, it must "forget" its current
+snapshot of the database. We do this because the server may have
+missed some updates during the time it was declared unavailable,
+leaving this server's copy out of date. There are ways to minimize the
+impact of this (e.g. by versioning plus logging) but they are beyond
+the scope of this project.
+
+<p>
+Only RPCs may be used for interaction between clients and servers,
+between different servers, and between different clients. For example,
+different instances of your server are not allowed to share Go
+variables or files. You may not change any of the RPCs you have been
+given, nor should you "re-purpose" any of the RPC arguments.
+
+<p>
+The design outlined here has some fault-tolerance and performance limitations
+which make it too weak for real-world use:
+<ul>
+  <li>The view service is a single point of failure, because it is not
+  replicated.
+
+  <li>The primary and backup process operations one at a time, limiting
+  their performance.
+
+  <li>A recovering server must copy a complete database of key/value
+  pairs from the primary, which will be slow, even if the recovering
+  server has an almost-up-to-date copy of the data already (e.g., only
+  missed a few minutes of updates while its network connection was
+  temporarily broken).
+
+  <li>The servers don't store the key/value database on disk, so they
+  can't survive simultaneous crashes (e.g., a site-wide power
+  failure).
+
+  <li>If a temporary problem prevents primary to backup communication,
+  the system has only two remedies: change the view to eliminate the
+  backup, or keep trying; neither performs well if such problems are
+  frequent.
+
+  <li>If a primary fails before acknowledging the view in which it is
+  primary, the view service cannot make progress---it will spin
+  forever and not perform a view change.
+
+</ul>
+
+<p>We will address some of these limitations in subsequent projects by using 
+better designs and protocols.  This project will help you understand the 
+problems that you'll solve in the succeeding projects.
+
+<h3>Software</h3>
+
+<p>
+Download the archive <a href="proj2.tar.gz">proj2.tar.gz</a> and uncompress 
+it to get the skeleton code and tests in <tt>viewservice</tt> and
+<tt>pbservice</tt>.
+
+<pre>
+% cd proj2/viewservice
+% go test
+Test: First primary ...
+wanted: View{primary: "/var/tmp/824-501/viewserver-68948-1", Backup: "", Viewnum: 1}
+got:    View{primary: "", Backup: "", Viewnum: 0}
+--- FAIL: Test1 (0.10s)
+    viewservice_test.go:21: wanted primary /var/tmp/824-501/viewserver-68948-1, got 
+FAIL
+exit status 1
+FAIL    umich.edu/eecs491/proj2/viewservice     0.349s
+</pre>
+
+<h3>Part A: The Viewservice</h3>
+
+<p>
+In Part A you will implement a view service and make sure it passes
+our tests; in Part B, you will build the key/value service.  Your view
+service won't be replicated, so it will be relatively
+straightforward. Part B is <i>much</i> more complex than part A,
+because the Key/Value service is replicated and you have to design
+much of the replication protocol based on lecture material.
+
+<p>
+The view service goes through a sequence of numbered
+<i>views</i>, each with a primary and (if possible) a backup.  A view
+consists of a view number and the identity (network port name) of the
+view's primary and backup servers.  The view service maintains a
+single view--the current view--at all times.  It responds with this
+view in response to all <i>Ping</i> and
+<i>Get</i> requests.  
+
+<p>
+The primary in view <em>N</em> must always be either the primary or
+the backup of view <em>N-1</em>. This helps ensure that the key/value
+service's state is preserved.  An exception: when the view service
+first starts, it should accept any server at all as the first primary;
+at that point, the Key/Value database is empty.  The backup in a view
+can be any server (other than the primary), or can be altogether
+missing if no server is available (represented by an empty
+string, <tt>""</tt>).
+
+<p>
+Each key/value server should send a <tt>Ping</tt> RPC once
+per <tt>PingInterval</tt> (see <tt>viewservice/common.go</tt>).  The
+view service replies to the Ping with a description of the current
+view. A <tt>Ping</tt> lets the view service know that the key/value
+server is alive, informs the view service of the most recent view that
+the key/value server knows about, and informs the key/value server of
+the current view.  If the view service doesn't receive a <tt>Ping</tt>
+from a server for <tt>DeadPings</tt> <tt>PingInterval</tt>s, the view
+service should consider the server to be unavailable.  When a server
+restarts after a crash, it should send one or more Pings with a view
+number of zero to inform the view service of this fact. This informs
+the view server that the restarting server no longer has a current
+copy of the Key/Value databse.
+
+<p>
+The view service attempts to advance to a new view in any of the
+following situations:
+<ul>
+  <li>Upon startup, when the first available idle server becomes available,</li>
+  <li>the current primary or backup is judged to be unavailable,</li>
+  <li>the current primary or backup crashed and restarted,</li>
+  <li>there is no current backup, and an idle server becomes available</li> 
+</ul>
+  
+However, the view service <b>must not</b> promote the Backup in
+view <i>i</i> to be the Primary in view <i>i+1</i> until the primary
+from view <i>i</i> acknowledges that it is operating in view <i>i</i>
+(by sending a Ping where the view number is set to <i>i</i>). The
+primary should only do so <b>after</b> it has successfully trasnferred
+its state to the Backup in view <i>i</i>.
+
+<p> The acknowledgment rule helps ensure that the view service
+advances the view only after the primary has finished bootstrapping
+the backup.  This prevents the backup from being promoted to become
+the new primary before the backup has a copy of the primary's state.
+The downside of the acknowledgement rule is that if the primary fails
+before it acknowledges the view in which it is primary, then the view
+service cannot ever change views again.
+
+<p> Note that you have some flexibility about what to do in some
+sitautions, but not in others. If a Primary fails and restarts,
+it <b>cannot</b> continue serving as the Primary, no matter what else
+has (or has not) happened in the system. However, there are times when
+it might be prudent to allow a node to continue serving in its current
+role even if the view service hasn't heard from it
+in <tt>DeadPings</tt> ticks---for example, if the alternative is to
+have the service shut down. Explain any such decisions in your Project
+2 Narrative.
+
+<p>
+We provide you with a complete <tt>client.go</tt> and appropriate RPC
+definitions in <tt>common.go</tt>.  Your job is to supply the needed
+code in <tt>server_impl.go</tt>.  When you're done, you should pass
+all the tests in <tt>viewservice_test.go</tt>.  To pass additional
+tests on the autograder, you are encouraged to test your view service
+more extensively. We will neither disclose nor offer hints about the
+contents of the hidden test cases.
+
+Things to pay attention to:
+<ul>
+<li>There may be more than two servers sending Pings. The extra ones
+    (beyond primary and backup) are volunteering to be backup if
+    needed.</li>
+
+<li>The view service needs a way to detect that a primary or backup
+    has failed and restarted. For example, the primary may crash and
+    quickly restart without missing sending a single Ping. Hint: this
+    is also why views must be numbered.</li>
+
+<li>You should advance views as soon as possible, but no
+    sooner. Advancing a view should be done as completely as
+    possible. For example, if you are promoting a Backup to be the new
+    Primary, and there is <em>any</em> node available to be recruited
+    as the new Backup, the promotion and recruitment should both
+    happen in a single step.</li>
+
+<li>Study the test cases before you start programming. If you fail a
+    test, you may have to look at the test code
+    in <tt>viewservice_test.go</tt> to figure out the failure
+    scenario.</li>
+
+<li>Remember that the Go RPC server framework starts a new thread for
+    each received RPC request. Thus, if multiple RPCs arrive at the
+    same time (from multiple clients), there may be multiple threads
+    running concurrently in the server. However, each of your servers
+    should only do one thing at a time. Consider using
+    the <em>confinement idiom</em> to ensure this happens.</li>
+    Importantly, you <strong>do not</strong> have to allow concurrent
+    client requests.
+
+<li>For full credit, you must ensure that every goroutine your
+    viewserver or pbserver launches will terminate if its enclosing
+    server dies. The tests kill a server by closing its <tt>dead</tt>
+    channel. We supply a convenience function <tt>isdead</tt> that you
+    may use to check the state of this channel. Consider protecting
+    blocking channel operaitons with a read from this channel, and
+    guard any blocking I/O (e.g. RPC calls) with the convenience
+    function.</b></li>
+
+<li>The easiest way to track down bugs is to insert log.Printf()
+    statements, collect the output in a file with <tt>go test &gt;
+    out</tt>, and then think about whether the output matches your
+    understanding of how your code should behave.</li>
+</ul>
+
+In handling design decisions, it is reasonable to choose simpler
+options over more complex ones, even if the simpler option requires
+you to maintain some extra state or take a few more steps. For
+example, it is perfectly acceptable for your view service to have
+state linear in the number of servers that have ever
+called <tt>Ping</tt>
+
+<h3>Part B: The primary/backup key/value service</h3>
+
+<p>
+The primary/backup key/value server source is in <tt>pbservice</tt>.
+We supply you with the client in <tt>pbservice/client.go</tt>, and
+part of the server in <tt>pbservice/server.go</tt>. Clients use the
+service by creating a Clerk object (see <tt>client.go</tt>) and
+calling its methods, which send RPCs to the service. We define the
+RPCs of the server in <tt>pbservice/rpcs.go</tt>. You may not add to
+or modify this set.
+
+<p>
+Your key/value service should continue operating correctly as long as
+there has never been a time at which no server was alive and the
+primary has never failed before the corresponding backup has been
+established. It should also operate correctly with partitions: a
+server that suffers temporary network failure without crashing, or can
+talk to some computers but not others. If your service is operating
+with just one server, it should be able to incorporate a recovered or
+idle server (as backup) so that it can then tolerate another server
+failure.
+
+<p> Correct operation means that calls to Clerk.Get(k) return the
+latest value set by a previous successful call to Clerk.Put(k,v) or
+Clerk.Append(k,v), or an empty string if the key has never seen
+either.  All modifications should provide at-most-once semantics,
+i.e., no modification should be applied multiple times to the
+replicated key/value database, despite client retries.
+
+<p>
+You may assume that the view service never halts or crashes, but
+cannot assume that requests to and responses from it will never fail.
+
+<p>
+Your clients and servers may only communicate using RPC, and both
+clients and servers must send RPCs with the <tt>call()</tt> function
+in their respective code bases.
+
+<p>
+It's crucial that at most one primary be active at any given time. You
+should have a clear story worked out for why that's the case for your
+design. A danger: suppose in some view S1 is the primary; the view
+service changes views so that S2 is the primary; but S1 hasn't yet
+heard about the new view and thinks it is still primary. Then some
+clients might talk to S1, and others talk to S2, and not see each
+others' Put()s. Your solution should account for this by
+confirming <strong>every</strong> operation at the backup.
+
+<p>
+A server that recieves a client request while it is not the active
+primary should signal this by setting the <tt>Err</tt> field of
+the <tt>OpReply</tt> struct to <tt>ErrWrongServer</tt>. 
+
+<p> Clerk.Get(), Clerk.Put(), and Clerk.Append() will only return when
+they have completed the operation. The client code we provide ensures
+that operations are retried when they fail. This is done under the
+assumption that failures are transient and/or can be rectified by an
+advance in the view. Your server must account for the duplicate RPCs
+that these client retries will generate to ensure at-most-once
+semantics for modifications.  You may assume that each clerk has only
+one outstanding request (Get, Put, or Append).  Think carefully about
+what the <em>commit point</em> is for a Put or Append; you will
+describe this as part of your project narrative. You will also need to
+describe how your design chooses the commit point for a Get.
+
+<p>
+A server should not talk to the view service for every Put/Get
+it receives, since that would put the view service on the critical path
+for performance and fault-tolerance. Instead servers should
+Ping the view service periodically
+(in <tt>pbservice/server_impl.go</tt>'s <tt>tick()</tt>)
+to learn about new views. Similarly, the client Clerk will not
+talk to the view service for every RPC it sends; instead, the
+Clerk caches the current primary, and only talks to the
+view service when the current view is or seems to be incorrect.
+
+<p>
+You'll need to ensure that the backup sees every update to the
+key/value database, by a combination of the primary initializing it
+with the complete key/value database and forwarding subsequent client
+operations.  Your primary should forward just the arguments to
+each <tt>Append()</tt> to the backup; do not forward the resulting
+value, which might be large.
+
+<p>
+The skeleton code for the key/value servers is in <tt>pbservice</tt>.
+Since the <tt>go.mod</tt> file included in the skeleton code specifies
+the module path as <tt>umich.edu/eecs491/proj2</tt>, you'll need to
+import <tt>umich.edu/eecs491/proj2/viewservice</tt> to use your
+implementation of <tt>viewservice</tt> in <tt>pbservice</tt>.  See
+<tt>pbservice/server.go</tt> for how this is done.
+
+<p>
+You can run the tests provided to you as follows:
+<pre>
+% cd proj2/pbservice
+% go test
+Test: Single primary, no backup ...
+--- FAIL: TestBasicFail (2.01s)
+    pbservice_test.go:56: first primary never formed view
+...
+%
+</pre>
+
+<p>
+Here's a recommended plan of attack:
+
+<ol>
+<li>
+You should start by modifying <tt>pbservice/server_impl.go</tt>
+to Ping the view service to find the current view. Do this
+in the <tt>tick()</tt> function. Once a server knows the
+current view, it knows if it is the primary, the backup,
+or neither.
+
+<li>
+Implement code for Get, Put, and Append
+in <tt>pbservice/server_impl.go</tt>; store keys and values in
+a <tt>map[string]string</tt>.  If a key does not exist, Append should
+use an empty string for the previous value. 
+
+<li>
+Handle the case when a client re-tries a modification that has already
+been successfully applied.
+  
+<li>
+Modify your handlers so that the primary forwards updates to the
+backup. Your design has some flexibilty in the order in which this
+happens relative to the local update. You also must decide whether to
+retry failures to the backup or reflect such failures back to the
+client. Note that these decisions are not entirely independent of one
+another. Have a rationale for why you make the decisions you made, and
+be prepared to explain them in your narrative.
+
+<li>
+When a server becomes the backup in a new view, the primary should
+send it the primary's complete key/value database, plus any
+information necessary to handle clients re-trying modifications that
+have already been applied, but for which the client did not recieve
+acknowledgement.
+
+</ol>
+
+<p>
+You are done if you can pass all the tests
+in <tt>pbservice_test.go</tt> and a few additional tests on the
+autograder.  You'll see some lots of "rpc: client protocol error" and
+"rpc: writing response" and "unexpected EOF" complaints; ignore
+them. These are a byproduct of the way our infrastructure simulates
+network failures.
+
+<p>
+Things to pay attention to:
+<ul>
+<li> Unlike Project 1, in which the workers were stateless, when an RPC to
+a server fails in this project, that server may have updated its state but
+its reply may have failed to reach the sender of the RPC.
+
+<li> Whenever an RPC fails, sleep for viewservice.PingInterval before
+retrying the RPC. This avoids burning too much CPU.
+
+<li> For full credit, you must ensure that every goroutine your
+    viewserver or pbserver launches will terminate if its enclosing
+    server dies. The tests kill a server by closing its <tt>dead</tt>
+    channel. We supply a convenience function <tt>isdead</tt> that you
+    may use to check the state of this channel. Consider protecting
+    blocking channel operaitons with a read from this channel, and
+    guard any blocking I/O (e.g. RPC calls) with the convenience
+    function.</b></li>
+
+<li> Even if your viewserver passed all the tests in Part A, it
+may still have bugs that cause failures in Part B.
+
+<li> Study the test cases before you start programming.
+</ul>
+
+<h3>Part C: Documentation and Narratives</h3>
+
+<p>
+As part of this project, you will be given a
+repository <tt>uniqname.2doc</tt>. This repository should contain two
+files.  The file <tt>design.txt</tt> has questions about your
+viewservice design, and your pbservice design. Answer each of those
+questions clearly and concisely.
+
+<p>
+The file <tt>p1comments.txt</tt> is an opportunity for you to comment
+on other students' solutions to Project 1. Please fill it out for each
+of the P1 solutions you are given. Only students who acheive mastery
+for Project 1 by the nominal deadline will be given able to complete
+this.
+
+The templates for both of these files is in the handout tarball.
+
+<h3>Handin procedure</h3>
+
+<p>
+Clone the two repositories that we have created for you on
+GitHub: <tt>uniqname.2</tt> and <tt>uniqname.2doc</tt>
+
+<p>
+When you submit your project to the <a href="https://lamport.eecs.umich.edu/eecs491/submit.php?2">autograder</a>, it will pull the following files from your repository:
+<ul>
+	<li><tt>viewservice/server_impl.go</tt>
+	<li><tt>pbservice/server_impl.go</tt>
+</ul>
+So, please ensure that a) your repository has directories
+called <tt>viewservice</tt> and <tt>pbservice</tt> containing these
+files, and b) all modifications that you make to the code handed out
+are restricted to only these files.
+
+<p>
+We will grade your "best" submission: the highest scoring one. In the
+event of a tie, we will use the latest submission with that high
+score. Your narrative should refer to that version of your submission.
+
+<p>
+Among the unit tests included in the handout, if you find that you
+pass some of them locally on your computer but not on the autograder
+<ul>
+	<li>Check that you have only modified the *impl.go files
+	<li>Check that you pass on CAEN all the tests that you pass locally
+	<li>Ensure that you use appropriate synchronization to protect any access to shared data from any goroutine; to check, run "go test" on CAEN with the "-race" flag
+<!--
+race conditions in your code can cause your code to behave differently on the autograder than on CAEN
+-->
+	<li>Since some of the tests are non-deterministic, run them repeatedly and make sure you pass them every time
+	<li>If you still pass all runs of the test cases, post privately on Piazza
+</ul>
+
+ </body>
+ </html>

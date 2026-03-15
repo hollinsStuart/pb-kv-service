@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+option go_package = "github.com/hollinsStuart/pb-kv-service/proto/pbpb";
+
+package pb;
+
+// --- Client Operations ---
+
+message GetArgs {
+  string key = 1;
+}
+
+message GetReply {
+  string value = 1;
+  string err = 2; // Used to return errors like "ErrNoKey" or "ErrWrongServer"
+}
+
+message PutAppendArgs {
+  string key = 1;
+  string value = 2;
+  string op = 3; // "Put" or "Append"
+
+  // Essential for exactly-once semantics to prevent duplicate writes on retry
+  int64 client_id = 4;
+  int64 seq_num = 5;
+}
+
+message PutAppendReply {
+  string err = 1;
+}
+
+// --- Internal Primary/Backup Replication ---
+
+// You can often reuse PutAppendArgs for forwarding, but defining a specific
+// message is cleaner if you need to pass additional internal state.
+message ForwardArgs {
+  PutAppendArgs args = 1;
+}
+
+message ForwardReply {
+  string err = 1;
+}
+
+message TransferStateArgs {}
+
+message TransferStateReply {
+  map<string, string> state = 1; // Transfers the entire KV store
+  string err = 2;
+}
+
+service PBService {
+  // Client-facing RPCs
+  rpc Get(GetArgs) returns (GetReply);
+  rpc PutAppend(PutAppendArgs) returns (PutAppendReply);
+
+  // Internal node-to-node RPCs
+  rpc Forward(ForwardArgs) returns (ForwardReply);
+  rpc TransferState(TransferStateArgs) returns (TransferStateReply);
+}

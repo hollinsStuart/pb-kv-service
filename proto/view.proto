@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+option go_package = "github.com/hollinsStuart/pb-kv-service/proto/viewpb";
+
+package view;
+
+// Represents the current state of the cluster
+message View {
+  uint64 view_num = 1;
+  string primary = 2; // The network address/ID of the primary node
+  string backup = 3;  // The network address/ID of the backup node
+}
+
+message PingArgs {
+  string me = 1;       // The ID of the node sending the ping
+  uint64 view_num = 2; // The view number this node currently thinks is active
+}
+
+message PingReply {
+  View view = 1;
+}
+
+message GetArgs {} // Empty request
+
+message GetReply {
+  View view = 1;
+}
+
+service ViewService {
+  // Nodes send heartbeats
+  rpc Ping(PingArgs) returns (PingReply);
+
+  // Anyone can ask for the current view
+  rpc Get(GetArgs) returns (GetReply);
+}
