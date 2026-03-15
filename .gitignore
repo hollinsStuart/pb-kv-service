@@ -6,8 +6,7 @@
 *.dylib
 listener
 sender
-viewservice
-pbservice
+bin/
 
 # Test binaries and output files
 *.test

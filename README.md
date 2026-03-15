@@ -26,11 +26,9 @@ protoc -I=proto \
 The ViewService acts as the central control plane for the distributed key-value store, assigning Primary and Backup roles and monitoring node liveness via gRPC heartbeats. To deploy it as a standalone service, navigate to the root of the project and compile the entry point into an executable binary. Once compiled, you can run the server and specify the TCP port it should listen on.
 
 ```bash
-# 1. Compile the ViewService into an executable named 'viewserver'
-go build -o viewserver ./viewservice/main.go
-
-go build -o viewserver ./cmd/viewserver
+# 1. Compile the ViewService into the dedicated bin/ directory
+go build -o ./bin/viewserver ./cmd/viewserver
 
 # 2. Run the server (defaults to port :50000 if the flag is omitted)
-./viewserver -port :50000
+./bin/viewserver -port :50000
 ```
