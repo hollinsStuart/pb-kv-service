@@ -330,6 +330,7 @@ func (x *ForwardReply) GetErr() string {
 
 type TransferStateArgs struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	State         map[string]string      `protobuf:"bytes,1,rep,name=state,proto3" json:"state,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -362,6 +363,13 @@ func (x *TransferStateArgs) ProtoReflect() protoreflect.Message {
 // Deprecated: Use TransferStateArgs.ProtoReflect.Descriptor instead.
 func (*TransferStateArgs) Descriptor() ([]byte, []int) {
 	return file_pb_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *TransferStateArgs) GetState() map[string]string {
+	if x != nil {
+		return x.State
+	}
+	return nil
 }
 
 type TransferStateReply struct {
@@ -437,8 +445,13 @@ const file_pb_proto_rawDesc = "" +
 	"\vForwardArgs\x12%\n" +
 	"\x04args\x18\x01 \x01(\v2\x11.pb.PutAppendArgsR\x04args\" \n" +
 	"\fForwardReply\x12\x10\n" +
-	"\x03err\x18\x01 \x01(\tR\x03err\"\x13\n" +
-	"\x11TransferStateArgs\"\x99\x01\n" +
+	"\x03err\x18\x01 \x01(\tR\x03err\"\x85\x01\n" +
+	"\x11TransferStateArgs\x126\n" +
+	"\x05state\x18\x01 \x03(\v2 .pb.TransferStateArgs.StateEntryR\x05state\x1a8\n" +
+	"\n" +
+	"StateEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x99\x01\n" +
 	"\x12TransferStateReply\x127\n" +
 	"\x05state\x18\x01 \x03(\v2!.pb.TransferStateReply.StateEntryR\x05state\x12\x10\n" +
 	"\x03err\x18\x02 \x01(\tR\x03err\x1a8\n" +
@@ -450,7 +463,7 @@ const file_pb_proto_rawDesc = "" +
 	"\x03Get\x12\v.pb.GetArgs\x1a\f.pb.GetReply\x122\n" +
 	"\tPutAppend\x12\x11.pb.PutAppendArgs\x1a\x12.pb.PutAppendReply\x12,\n" +
 	"\aForward\x12\x0f.pb.ForwardArgs\x1a\x10.pb.ForwardReply\x12>\n" +
-	"\rTransferState\x12\x15.pb.TransferStateArgs\x1a\x16.pb.TransferStateReplyB\x1aZ\x18pb-kv-service/proto/pbpbb\x06proto3"
+	"\rTransferState\x12\x15.pb.TransferStateArgs\x1a\x16.pb.TransferStateReplyB3Z1github.com/hollinsStuart/pb-kv-service/proto/pbpbb\x06proto3"
 
 var (
 	file_pb_proto_rawDescOnce sync.Once
@@ -464,7 +477,7 @@ func file_pb_proto_rawDescGZIP() []byte {
 	return file_pb_proto_rawDescData
 }
 
-var file_pb_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_pb_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_pb_proto_goTypes = []any{
 	(*GetArgs)(nil),            // 0: pb.GetArgs
 	(*GetReply)(nil),           // 1: pb.GetReply
@@ -474,24 +487,26 @@ var file_pb_proto_goTypes = []any{
 	(*ForwardReply)(nil),       // 5: pb.ForwardReply
 	(*TransferStateArgs)(nil),  // 6: pb.TransferStateArgs
 	(*TransferStateReply)(nil), // 7: pb.TransferStateReply
-	nil,                        // 8: pb.TransferStateReply.StateEntry
+	nil,                        // 8: pb.TransferStateArgs.StateEntry
+	nil,                        // 9: pb.TransferStateReply.StateEntry
 }
 var file_pb_proto_depIdxs = []int32{
 	2, // 0: pb.ForwardArgs.args:type_name -> pb.PutAppendArgs
-	8, // 1: pb.TransferStateReply.state:type_name -> pb.TransferStateReply.StateEntry
-	0, // 2: pb.PBService.Get:input_type -> pb.GetArgs
-	2, // 3: pb.PBService.PutAppend:input_type -> pb.PutAppendArgs
-	4, // 4: pb.PBService.Forward:input_type -> pb.ForwardArgs
-	6, // 5: pb.PBService.TransferState:input_type -> pb.TransferStateArgs
-	1, // 6: pb.PBService.Get:output_type -> pb.GetReply
-	3, // 7: pb.PBService.PutAppend:output_type -> pb.PutAppendReply
-	5, // 8: pb.PBService.Forward:output_type -> pb.ForwardReply
-	7, // 9: pb.PBService.TransferState:output_type -> pb.TransferStateReply
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	8, // 1: pb.TransferStateArgs.state:type_name -> pb.TransferStateArgs.StateEntry
+	9, // 2: pb.TransferStateReply.state:type_name -> pb.TransferStateReply.StateEntry
+	0, // 3: pb.PBService.Get:input_type -> pb.GetArgs
+	2, // 4: pb.PBService.PutAppend:input_type -> pb.PutAppendArgs
+	4, // 5: pb.PBService.Forward:input_type -> pb.ForwardArgs
+	6, // 6: pb.PBService.TransferState:input_type -> pb.TransferStateArgs
+	1, // 7: pb.PBService.Get:output_type -> pb.GetReply
+	3, // 8: pb.PBService.PutAppend:output_type -> pb.PutAppendReply
+	5, // 9: pb.PBService.Forward:output_type -> pb.ForwardReply
+	7, // 10: pb.PBService.TransferState:output_type -> pb.TransferStateReply
+	7, // [7:11] is the sub-list for method output_type
+	3, // [3:7] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_pb_proto_init() }
@@ -505,7 +520,7 @@ func file_pb_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pb_proto_rawDesc), len(file_pb_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

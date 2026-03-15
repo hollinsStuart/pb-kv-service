@@ -32,3 +32,13 @@ go build -o ./bin/viewserver ./cmd/viewserver
 # 2. Run the server (defaults to port :50000 if the flag is omitted)
 ./bin/viewserver -port :50000
 ```
+
+## Simple example
+
+```bash
+go run ./cmd/viewservice/main.go -port :50000
+
+go run ./cmd/pbservice/main.go -port :50001 -vs localhost:50000
+
+go run ./cmd/pbservice/main.go -port :50002 -vs localhost:50000
+```

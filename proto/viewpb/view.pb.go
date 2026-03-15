@@ -280,7 +280,7 @@ const file_view_proto_rawDesc = "" +
 	".view.ViewR\x04view2\\\n" +
 	"\vViewService\x12'\n" +
 	"\x04Ping\x12\x0e.view.PingArgs\x1a\x0f.view.PingReply\x12$\n" +
-	"\x03Get\x12\r.view.GetArgs\x1a\x0e.view.GetReplyB\x1cZ\x1apb-kv-service/proto/viewpbb\x06proto3"
+	"\x03Get\x12\r.view.GetArgs\x1a\x0e.view.GetReplyB5Z3github.com/hollinsStuart/pb-kv-service/proto/viewpbb\x06proto3"
 
 var (
 	file_view_proto_rawDescOnce sync.Once

@@ -41,7 +41,9 @@ message ForwardReply {
   string err = 1;
 }
 
-message TransferStateArgs {}
+message TransferStateArgs {
+  map<string, string> state = 1;
+}
 
 message TransferStateReply {
   map<string, string> state = 1; // Transfers the entire KV store
